@@ -8,7 +8,7 @@ touch $XAUTH
 xauth nlist $DISPLAY | sed -e 's/^..../ffff/' | xauth -f $XAUTH nmerge -
 
 echo "Running Docker Container"
-CONTAINER_NAME=cuda-lab-evs
+CONTAINER_NAME=cuda-project-evs
 
 for (( i=1; i<=$#; i++));
 do
