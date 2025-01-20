@@ -151,44 +151,6 @@ int main()
 
             cudaMemcpy(d_output, h_loss.data(), batch_size * output_size * sizeof(float), cudaMemcpyHostToDevice);
 
-            // // Backpropagation: output -> hidden
-            // CUDNN_CALL(cudnnActivationBackward(cudnn, activation_desc, &alpha, output_desc, d_output,
-            //                                    output_desc, d_output, hidden_desc, d_hidden,
-            //                                    &beta, hidden_desc, d_hidden));
-
-
-
-            // // Update weights2 and bias2
-            // for(int i = 0; i < hidden_size * output_size; ++i) 
-            // {
-            //     h_weights2[i] -= learning_rate * h_loss[i % output_size];
-            // }
-            // for(int i = 0; i < output_size; ++i) 
-            // {
-            //     h_bias2[i] -= learning_rate * h_loss[i];
-            // }
-
-            // cudaMemcpy(d_weights2, h_weights2.data(), hidden_size * output_size * sizeof(float), cudaMemcpyHostToDevice);
-            // // cudaMemcpy(d_bias2, h_bias2.data(), output_size * sizeof(float), cudaMemcpyHostToDevice);
-
-            // // Backpropagation: hidden -> input
-            // CUDNN_CALL(cudnnActivationBackward(cudnn, activation_desc, &alpha, hidden_desc, d_hidden,
-            //                                    hidden_desc, d_hidden, input_desc, d_input,
-            //                                    &beta, input_desc, d_input));
-            
-            // // Update weights1 and bias1
-            // for(int i = 0; i < input_size * hidden_size; ++i) 
-            // {
-            //     h_weights1[i] -= learning_rate * h_loss[i % hidden_size];
-            // }
-            // for(int i = 0; i < hidden_size; ++i) 
-            // {
-            //     h_bias1[i] -= learning_rate * h_loss[i];
-            // }
-
-            // cudaMemcpy(d_weights1, h_weights1.data(), input_size * hidden_size * sizeof(float), cudaMemcpyHostToDevice);
-            // cudaMemcpy(d_bias1, h_bias1.data(), hidden_size * sizeof(float), cudaMemcpyHostToDevice);
-
         }
 
         // //Evaluate model every epoch
