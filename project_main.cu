@@ -48,6 +48,18 @@ void normalize_data(float* data, int size)
 }
 
 
+void one_hot_encode(float* y, float* label_vector, int size)
+{
+    for(int i=0; i<size; i++)
+    {
+        for(int j=0; j<10; j++)
+        {
+            label_vector[i*10 + j] = ((float)j == y[i]) ? 1 : 0;
+        }
+    }
+}
+
+
 void initialize_weights(float* weights, int size)
 {
     std::mt19937 g(time(0));
@@ -108,7 +120,7 @@ __global__ void crossEntropyLoss(float* predictions, float* labels, float* loss)
 
     float l = -labels[idx] * logf(predictions[idx]);
 
-    atomicAdd(&loss[batch_idx], l);
+    atomicAdd(loss, l);
 }
 
 
@@ -179,21 +191,32 @@ int main()
     const int num_epochs = 10;
     const float learning_rate = 0.001f;
 
-    float loss;
-    // float* predictions = new float[output_size * batch_size];
-
     float* x_train;
     float* y_train;
     float* x_test;
     float* y_test;
 
-    x_train = load_data("dataset/x_train.txt", 60000 * input_size);
-    y_train = load_data("dataset/y_train.txt", 60000);
-    x_test = load_data("dataset/x_test.txt", 10000 * input_size);
-    y_test = load_data("dataset/y_test.txt", 10000);
+    int train_set_size = 10000;
+    int test_set_size = 10000;
 
-    normalize_data(x_train, 60000 * input_size);
-    normalize_data(x_test, 10000 * input_size);
+    x_train = load_data("dataset/x_train.txt", train_set_size * input_size);
+    y_train = load_data("dataset/y_train.txt", train_set_size);
+    x_test = load_data("dataset/x_test.txt", test_set_size * input_size);
+    y_test = load_data("dataset/y_test.txt", test_set_size);
+
+    float* train_labels = new float[train_set_size * 10];
+    float* test_labels = new float[test_set_size * 10];
+    
+    float loss;
+    float* losses = new float[batch_size];
+
+    memset(losses, 0, batch_size);
+
+    one_hot_encode(y_train, train_labels, train_set_size);
+    one_hot_encode(y_test, test_labels, test_set_size);
+
+    normalize_data(x_train, train_set_size * input_size);
+    normalize_data(x_test, test_set_size * input_size);
 
     //intialize host layers
     layer_type layer1, layer2, layer3;
@@ -225,7 +248,7 @@ int main()
     float* d_loss;
 
     cudaMalloc((void**)&d_labels, output_size * batch_size * sizeof(float));
-    cudaMalloc((void**)&d_loss, sizeof(float));
+    cudaMalloc((void**)&d_loss, batch_size * sizeof(float));
 
     layer_type d_layer1, d_layer2, d_layer3;
 
@@ -273,10 +296,14 @@ int main()
     for(int epoch = 1; epoch <= 1; epoch++)
     {
         printf("Epoch: %d", epoch);
-        for(int i = 0; i < 60000 / batch_size; i+=batch_size)
+        
+        loss = 0.0f;
+        cudaMemset(d_loss, 0, batch_size * sizeof(float));
+        
+        for(int i = 0; i < train_set_size / batch_size; i+=batch_size)
         {
             cudaMemcpy(d_layer1.inputs, &x_train[i*input_size], input_size * batch_size * sizeof(float), cudaMemcpyHostToDevice);
-            cudaMemcpy(d_labels, &y_train[i*input_size], output_size * batch_size * sizeof(float), cudaMemcpyHostToDevice);
+            cudaMemcpy(d_labels, &train_labels[i*output_size], output_size * batch_size * sizeof(float), cudaMemcpyHostToDevice);
 
             // Forward pass: input -> hidden
             linearLayerForward<<<batch_size, hidden_size>>>(d_layer1, input_size, hidden_size, batch_size);
@@ -295,24 +322,29 @@ int main()
 
             // Loss
             crossEntropyLoss<<<batch_size, output_size>>>(d_layer3.activation, d_labels, d_loss);
-            cudaMemcpy(&loss, d_loss, sizeof(float), cudaMemcpyDeviceToHost);
+            cudaMemcpy(losses, d_loss, batch_size * sizeof(float), cudaMemcpyDeviceToHost);
+            for(int j=0; j<batch_size; j++)
+            {
+                printf("Partial loss: %f", losses[j]);   
+                loss += losses[j] / (float)batch_size;
+            }
             printf("Batch: %d, Loss: %f", i, loss);
 
 
-            // Backward pass: output -> hidden
-            crossEntropyLossDerivative<<<batch_size, output_size>>>(d_layer3.activation, d_labels, d_layer3.input_grad);
-            linearLayerBackward<<<batch_size, output_size>>>(d_layer3, hidden_size, output_size, batch_size);
-            updateLayer<<<1, output_size>>>(d_layer3, learning_rate, hidden_size, output_size, batch_size);
+            // // Backward pass: output -> hidden
+            // crossEntropyLossDerivative<<<batch_size, output_size>>>(d_layer3.activation, d_labels, d_layer3.input_grad);
+            // linearLayerBackward<<<batch_size, output_size>>>(d_layer3, hidden_size, output_size, batch_size);
+            // updateLayer<<<1, output_size>>>(d_layer3, learning_rate, hidden_size, output_size, batch_size);
 
-            // Backward pass: hidden -> hidden
-            reluDerivative<<<batch_size, hidden_size>>>(d_layer3.output_grad, d_layer2.input_grad);
-            linearLayerBackward<<<batch_size, hidden_size>>>(d_layer2, hidden_size, hidden_size, batch_size);
-            updateLayer<<<1, hidden_size>>>(d_layer2, learning_rate, hidden_size, hidden_size, batch_size);
+            // // Backward pass: hidden -> hidden
+            // reluDerivative<<<batch_size, hidden_size>>>(d_layer3.output_grad, d_layer2.input_grad);
+            // linearLayerBackward<<<batch_size, hidden_size>>>(d_layer2, hidden_size, hidden_size, batch_size);
+            // updateLayer<<<1, hidden_size>>>(d_layer2, learning_rate, hidden_size, hidden_size, batch_size);
 
-            // Backward pass: hidden -> input
-            reluDerivative<<<batch_size, hidden_size>>>(d_layer2.output_grad, d_layer1.input_grad);
-            linearLayerBackward<<<batch_size, hidden_size>>>(d_layer1, input_size, hidden_size, batch_size);
-            updateLayer<<<1, hidden_size>>>(d_layer1, learning_rate, input_size, hidden_size, batch_size);
+            // // Backward pass: hidden -> input
+            // reluDerivative<<<batch_size, hidden_size>>>(d_layer2.output_grad, d_layer1.input_grad);
+            // linearLayerBackward<<<batch_size, hidden_size>>>(d_layer1, input_size, hidden_size, batch_size);
+            // updateLayer<<<1, hidden_size>>>(d_layer1, learning_rate, input_size, hidden_size, batch_size);
         }
     }
 
@@ -321,6 +353,18 @@ int main()
     delete[] y_train;
     delete[] x_test;
     delete[] y_test;
+
+    delete[] train_labels;
+    delete[] test_labels;
+
+    delete[] layer1.weights;
+    delete[] layer1.biases;
+    delete[] layer2.weights;
+    delete[] layer2.biases;
+    delete[] layer3.weights;
+    delete[] layer3.biases;
+
+    delete[] losses;
 
     //free device memory
     cudaFree(d_layer1.weights);
@@ -355,4 +399,6 @@ int main()
 
     cudaFree(d_labels);
     cudaFree(d_loss);
+
+    return 0;
 }
