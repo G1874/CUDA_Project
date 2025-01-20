@@ -42,6 +42,25 @@ void normalize_data(float* data, int size)
     }
 }
 
+void initialize_weights(float* weights, int size)
+{
+    std::mt19937 g(time(0));
+    std::uniform_real_distribution<float> dist(0.0f, 1.0f);
+
+    for(int i = 0; i < size; i++)
+    {
+        weights[i] = dist(g);
+    }
+}
+
+void initialize_biases(float* biases, int size)
+{
+    for(int i = 0; i < size; i++)
+    {
+        biases[i] = 0.0f;
+    }
+}
+
 
 __global__ float relu(float* input, float* output)
 {
@@ -142,49 +161,78 @@ int main()
     normalize_data(x_test, 10000 * input_size);
 
     //allocate host memory
-    float* weights = new float[input_size * hidden_size + hidden_size * hidden_size + hidden_size * output_size];
-    float* biases = new float[hidden_size + hidden_size + output_size];
+    float* weights1 = new float[input_size * hidden_size];
+    float* weights2 = new float[hidden_size * hidden_size];
+    float* weights3 = new float[hidden_size * output_size];
+    float* biases1 = new float[hidden_size];
+    float* biases2 = new float[hidden_size];
+    float* biases3 = new float[output_size];
 
     //initialize weights and biases
-    std::mt19937 g(time(0));
-    std::uniform_real_distribution<float> dist(0.0f, 1.0f);
+    initialize_weights(weights1, input_size * hidden_size);
+    initialize_weights(weights2, hidden_size * hidden_size);
+    initialize_weights(weights3, hidden_size * output_size);
 
-    for(int i = 0; i < input_size * hidden_size + hidden_size * hidden_size + hidden_size * output_size; i++)
-    {
-        weights[i] = dist(g);
-    }
-
-    for(int i = 0; i < hidden_size + hidden_size + output_size; i++)
-    {
-        biases[i] = 0.0f;
-    }
+    initialize_biases(biases1, hidden_size);
+    initialize_biases(biases2, hidden_size);
+    initialize_biases(biases3, output_size);
 
     //allocate device memory
-    float *d_input, *d_hidden, *d_output, *d_weights, *d_biases;
+    float *d_input, *d_output, *d_weights1, *d_weights2, *d_weights3, *d_biases1, *d_biases2, *d_biases3;
 
     cudaMalloc(&d_input, input_size * batch_size * sizeof(float));
-    cudaMalloc(&d_hidden, hidden_size * batch_size * sizeof(float));
-    cudaMalloc(&d_output, output_size * batch_size * sizeof(float));
-    cudaMalloc(&d_weights, input_size * hidden_size + hidden_size * hidden_size + hidden_size * output_size * sizeof(float));
-    cudaMalloc(&d_biases, hidden_size + hidden_size + output_size * sizeof(float));
+    cudaMalloc(&d_output, input_size * batch_size * sizeof(float));
+    cudaMalloc(&d_weights1, input_size * hidden_size * sizeof(float));
+    cudaMalloc(&d_weights2, hidden_size * hidden_size * sizeof(float));
+    cudaMalloc(&d_weights3, hidden_size * output_size * sizeof(float));
+    cudaMalloc(&d_biases1, hidden_size * sizeof(float));
+    cudaMalloc(&d_biases2, hidden_size * sizeof(float));
+    cudaMalloc(&d_biases3, output_size * sizeof(float));
+
 
     //copy data to device
     cudaMemcpy(d_input, x_train, input_size * batch_size * sizeof(float), cudaMemcpyHostToDevice);
-    cudaMemcpy(d_weights, weights, input_size * hidden_size + hidden_size * hidden_size + hidden_size * output_size * sizeof(float), cudaMemcpyHostToDevice);
-    cudaMemcpy(d_biases, biases, hidden_size + hidden_size + output_size * sizeof(float), cudaMemcpyHostToDevice);
+    cudaMemcpy(d_weights1, weights1, input_size * hidden_size * sizeof(float), cudaMemcpyHostToDevice);
+    cudaMemcpy(d_weights2, weights2, hidden_size * hidden_size * sizeof(float), cudaMemcpyHostToDevice);
+    cudaMemcpy(d_weights3, weights3, hidden_size * output_size * sizeof(float), cudaMemcpyHostToDevice);
+    cudaMemcpy(d_biases1, biases1, hidden_size * sizeof(float), cudaMemcpyHostToDevice);
+    cudaMemcpy(d_biases2, biases2, hidden_size * sizeof(float), cudaMemcpyHostToDevice);
+    cudaMemcpy(d_biases3, biases3, output_size * sizeof(float), cudaMemcpyHostToDevice);
+
+
+    //forward pass
+    for(int epoch = 0; epoch < 1; epoch++)
+    {
+        for(int i = 0; i < 60000 / batch_size; i++)
+        {
+        linearLayerForward<<<batch_size, hidden_size>>>(d_input, d_output, d_weights1, d_biases1, input_size, hidden_size, batch_size, RELU);
+        cudaMemcpy(d_input,d_output, hidden_size * batch_size * sizeof(float), cudaMemcpyDeviceToDevice);
+        linearLayerForward<<<batch_size, hidden_size>>>(d_input, d_output, d_weights2, d_biases2, hidden_size, hidden_size, batch_size, RELU);
+        cudaMemcpy(d_input,d_output, hidden_size * batch_size * sizeof(float), cudaMemcpyDeviceToDevice);
+        linearLayerForward<<<batch_size, output_size>>>(d_input, d_output, d_weights3, d_biases3, hidden_size, output_size, batch_size, NO_ACTIVATION_FCN);
+        cudaMemcpy(d_input,d_output, hidden_size * batch_size * sizeof(float), cudaMemcpyDeviceToDevice);
+        }
+    }
 
     //free host memory
     delete[] x_train;
     delete[] y_train;
     delete[] x_test;
     delete[] y_test;
-    delete[] weights;
-    delete[] biases;
+    delete[] weights1;
+    delete[] weights2;
+    delete[] weights3;
+    delete[] biases1;
+    delete[] biases2;
+    delete[] biases3;
 
     //free device memory
     cudaFree(d_input);
-    cudaFree(d_hidden);
     cudaFree(d_output);
-    cudaFree(d_weights);
-    cudaFree(d_biases);
+    cudaFree(d_weights1);
+    cudaFree(d_weights2);
+    cudaFree(d_weights3);
+    cudaFree(d_biases1);
+    cudaFree(d_biases2);
+    cudaFree(d_biases3);
 }
