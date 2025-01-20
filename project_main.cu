@@ -12,8 +12,8 @@ typedef struct {
     float* activation;
     float* output_grad;
     float* input_grad;
-    // float* weights_grad;
-    // float* bias_grad;
+    float* weights_grad;
+    float* bias_grad;
 } layer_type;
 
 
@@ -47,6 +47,7 @@ void normalize_data(float* data, int size)
     }
 }
 
+
 void initialize_weights(float* weights, int size)
 {
     std::mt19937 g(time(0));
@@ -57,6 +58,7 @@ void initialize_weights(float* weights, int size)
         weights[i] = dist(g);
     }
 }
+
 
 void initialize_biases(float* biases, int size)
 {
@@ -69,8 +71,8 @@ void initialize_biases(float* biases, int size)
 
 __global__ void relu(float* input, float* output)
 {
-    int batch_idx = blockIdx.x * blockDim.x;
-    int idx = batch_idx * threadIdx.x;
+    int batch_idx = blockIdx.x;
+    int idx = batch_idx * blockDim.x + neuron_idx;
 
     output[idx] = (input[idx] > 0.0f) ? input[idx] : 0.0f;
 }
@@ -78,8 +80,8 @@ __global__ void relu(float* input, float* output)
 
 __global__ void reluDerivative(float* input, float* output)
 {
-    int batch_idx = blockIdx.x * blockDim.x;
-    int idx = batch_idx * threadIdx.x;
+    int batch_idx = blockIdx.x;
+    int idx = batch_idx * blockDim.x + neuron_idx;
 
     output[idx] = (input[idx] > 0.0f) ? 1.0f : 0.0f;
 }
@@ -87,8 +89,8 @@ __global__ void reluDerivative(float* input, float* output)
 
 __global__ void softmax(float* input, float* output)
 {
-    int batch_idx = blockIdx.x * blockDim.x;
-    int idx = batch_idx * threadIdx.x;
+    int batch_idx = blockIdx.x;
+    int idx = batch_idx * blockDim.x + neuron_idx;
 
     extern __shared__ float sum[];
 
@@ -101,8 +103,8 @@ __global__ void softmax(float* input, float* output)
 
 __global__ void crossEntropyLoss(float* predictions, float* labels, float* loss)
 {
-    int batch_idx = blockIdx.x * blockDim.x;
-    int idx = batch_idx * threadIdx.x;
+    int batch_idx = blockIdx.x;
+    int idx = batch_idx * blockDim.x + neuron_idx;
 
     float l = -labels[idx] * logf(predictions[idx]);
 
@@ -112,18 +114,18 @@ __global__ void crossEntropyLoss(float* predictions, float* labels, float* loss)
 
 __global__ void crossEntropyLossDerivative(float* predictions, float* labels, float* error_grad)
 {
-    int batch_idx = blockIdx.x * blockDim.x;
-    int idx = batch_idx * threadIdx.x;
+    int batch_idx = blockIdx.x;
+    int idx = batch_idx * blockDim.x + neuron_idx;
 
     error_grad[idx] = predictions[idx] - labels[idx];
 }
 
 
-__global__ void linearLayerForward(layer_type layer, int inputSize, int outputSize, int batchSize)
+__global__ void linearLayerForward(layer_type layer, int inputSize, int layerSize, int batchSize)
 {
-    int batch_idx = blockIdx.x * blockDim.x;
+    int batch_idx = blockIdx.x;
     int neuron_idx = threadIdx.x;
-    int output_idx = batch_idx + neuron_idx;
+    int output_idx = batch_idx * blockDim.x + neuron_idx;
     int sample_idx = batch_idx * inputSize;
 
     float sum = 0.0f;
@@ -136,16 +138,35 @@ __global__ void linearLayerForward(layer_type layer, int inputSize, int outputSi
 }
 
 
-__global__ void linearLayerBackward(layer_type layer, float* inputs, int inputSize, int outputSize, int batchSize)
+__global__ void linearLayerBackward(layer_type layer, int inputSize, int layerSize, int batchSize)
 {
-    int batch_idx = blockIdx.x * blockDim.x;
-    int output_idx = batch_idx * threadIdx.x;
+    int batch_idx = blockIdx.x;
+    int neuron_idx = threadIdx.x;
+    int output_idx = batch_idx * blockDim.x + neuron_idx;
     int sample_idx = batch_idx * inputSize;
 
+    float bias_grad = layer.input_grad[output_idx];
+    atomicAdd(layer.bias_grad[neuron_idx], bias_grad);
+
+    float weight_grad;
     for(int i=0; i<inputSize; i++)
     {
-        weights_grad[output_idx*inputSize + i] = layer.input_grad[output_idx] + inputs[sample_idx + i];
-    } 
+        weight_grad = layer.input_grad[output_idx] * layer.inputs[sample_idx + i]
+        atomicAdd(layer.weights_grad[neuron_idx*inputSize + i], weight_grad);
+    }
+}
+
+
+__global__ void updateLayer(layer_type layer, float lr, int batchSize)
+{
+    int neuron_idx = threadIdx.x;
+
+    layer.biases[neuron_idx] -= lr * (layer.bias_grad[neuron_idx] / batch_size);
+
+    for(int i=0; i<layer.inputSize; i++)
+    {
+        layer.weights_grad[neuron_idx*inputSize + i] -= lr * (layer.weights_grad[neuron_idx*inputSize + i] / batch_size);
+    }
 }
 
 
