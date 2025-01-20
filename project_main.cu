@@ -43,39 +43,35 @@ void normalize_data(float* data, int size)
 }
 
 
-__global__ float relu(float* input, float* output)
+__global__ void relu(float* input, float* output)
 {
     int batch_idx = blockIdx.x * blockDim.x;
     int idx = batch_idx * threadIdx.x;
 
-    output[idx] = (x > 0.0f) ? x : 0.0f;
+    output[idx] = (input[idx] > 0.0f) ? input[idx] : 0.0f;
 }
 
 
-__global__ float reluDerivative(float* input, float* output)
+__global__ void reluDerivative(float* input, float* output)
 {
     int batch_idx = blockIdx.x * blockDim.x;
     int idx = batch_idx * threadIdx.x;
 
-    output[idx] = (x > 0.0f) ? 1.0f : 0.0f;
+    output[idx] = (input[idx] > 0.0f) ? 1.0f : 0.0f;
 }
 
 
-__global__ float sigmoid(float* input, float* output)
+__global__ void softmax(float* input, float* output)
 {
     int batch_idx = blockIdx.x * blockDim.x;
     int idx = batch_idx * threadIdx.x;
 
-    output[idx] = 1.0f / (1.0f + expf(-x));
-}
+    extern __shared__ float sum[];
 
+    atomicAdd(sum[batch_idx], expf(input[idx]));
+    __syncthreads();
 
-__global__ float sigmoidDerivative(float* input, float* output)
-{
-    int batch_idx = blockIdx.x * blockDim.x;
-    int idx = batch_idx * threadIdx.x;
-
-    output[idx] = sigmoid(x) * (1.0f - sigmoid(x));
+    output[idx] = expf(input[idx]) / sum[batch_idx];
 }
 
 
@@ -86,13 +82,16 @@ __global__ void crossEntropyLoss(float* predictions, float* labels, float* loss)
 
     float l = -labels[idx] * logf(predictions[idx]);
 
-    atomicAdd(loss[batch_idx], l)
+    atomicAdd(loss[batch_idx], l);
 }
 
 
-__global__ void crossEntropyLossDerivative(float* predictions, float* labels, float* loss)
+__device__ void crossEntropyLossDerivative(float* predictions, float* labels, float* output)
 {
-    // TODO:
+    int batch_idx = blockIdx.x * blockDim.x;
+    int idx = batch_idx * threadIdx.x;
+
+    output[idx] = predictions[idx] - labels[idx];
 }
 
 
@@ -100,22 +99,31 @@ __global__ void linearLayerForward(float* input, float* output, float* weights, 
                                    int inputSize, int outputSize, int batchSize)
 {
     int batch_idx = blockIdx.x * blockDim.x;
-    int output_idx = batch_idx + threadIdx.x;
+    int neuron_idx = threadIdx.x;
+    int output_idx = batch_idx + neuron_idx;
     int sample_idx = batch_idx * inputSize;
 
     float sum = 0.0f;
     for(int i=0; i<inputSize; i++)
     {
-        sum += input[sample_idx + i] * weights[output_idx*inputSize + i];
+        sum += input[sample_idx + i] * weights[neuron_idx*inputSize + i];
     }
     
-    output[output_idx] = sum + biases[output_idx];
+    output[output_idx] = sum + biases[neuron_idx];
 }
 
 
-__global__ void linearLayerBackward()
+__global__ void linearLayerBackward(float* error_grad, float* inputs, float* input_grad,
+                                    float* weights_grad, float* biases_grad, int batchSize)
 {
-    
+    int batch_idx = blockIdx.x * blockDim.x;
+    int output_idx = batch_idx * threadIdx.x;
+    int sample_idx = batch_idx * inputSize;
+
+    for(int i=0; i<inputSize; i++)
+    {
+        weights_grad[output_idx*inputSize + i] = error_grad[output_idx] + inputs[sample_idx + i];
+    } 
 }
 
 
