@@ -4,11 +4,12 @@
 #include <cmath>
 
 
-typedef enum {
-    RELU,
-    SIGMOID,
-    NO_ACTIVATION_FCN
-} activationFcn_type;
+typedef struct {
+    float* weights;
+    float* biases;
+    float* inputs;
+    float* outputs;
+} layer_type;
 
 
 float* load_data(const char* filename, int size)
@@ -42,32 +43,61 @@ void normalize_data(float* data, int size)
 }
 
 
-__device__ float relu(float x)
+__global__ float relu(float* input, float* output)
 {
-    return x > 0.0f ? x : 0.0f;
+    int batch_idx = blockIdx.x * blockDim.x;
+    int idx = batch_idx * threadIdx.x;
+
+    output[idx] = (x > 0.0f) ? x : 0.0f;
 }
 
 
-__device__ float reluDerivative(float x)
+__global__ float reluDerivative(float* input, float* output)
 {
-    return x > 0.0f ? 1.0f : 0.0f;
+    int batch_idx = blockIdx.x * blockDim.x;
+    int idx = batch_idx * threadIdx.x;
+
+    output[idx] = (x > 0.0f) ? 1.0f : 0.0f;
 }
 
 
-__device__ float sigmoid(float x)
+__global__ float sigmoid(float* input, float* output)
 {
-    return 1.0f / (1.0f + expf(-x));
+    int batch_idx = blockIdx.x * blockDim.x;
+    int idx = batch_idx * threadIdx.x;
+
+    output[idx] = 1.0f / (1.0f + expf(-x));
 }
 
 
-__device__ float sigmoidDerivative(float x)
+__global__ float sigmoidDerivative(float* input, float* output)
 {
-    return sigmoid(x) * (1.0f - sigmoid(x));
+    int batch_idx = blockIdx.x * blockDim.x;
+    int idx = batch_idx * threadIdx.x;
+
+    output[idx] = sigmoid(x) * (1.0f - sigmoid(x));
+}
+
+
+__global__ void crossEntropyLoss(float* predictions, float* labels, float* loss)
+{
+    int batch_idx = blockIdx.x * blockDim.x;
+    int idx = batch_idx * threadIdx.x;
+
+    float l = -labels[idx] * logf(predictions[idx]);
+
+    atomicAdd(loss[batch_idx], l)
+}
+
+
+__global__ void crossEntropyLossDerivative(float* predictions, float* labels, float* loss)
+{
+    // TODO:
 }
 
 
 __global__ void linearLayerForward(float* input, float* output, float* weights, float* biases,
-                                   int inputSize, int outputSize, int batchSize, activationFcn_type activation)
+                                   int inputSize, int outputSize, int batchSize)
 {
     int batch_idx = blockIdx.x * blockDim.x;
     int output_idx = batch_idx + threadIdx.x;
@@ -78,20 +108,14 @@ __global__ void linearLayerForward(float* input, float* output, float* weights, 
     {
         sum += input[sample_idx + i] * weights[output_idx*inputSize + i];
     }
-    sum += biases[output_idx];
+    
+    output[output_idx] = sum + biases[output_idx];
+}
 
-    switch(activation)
-    {
-        case RELU:
-            output[output_idx] = relu(sum);
-            break;
-        case SIGMOID:
-            output[output_idx] = sigmoid(sum);
-            break;
-        case NO_ACTIVATION_FCN:
-            output[output_idx] = sum;
-            break;
-    }
+
+__global__ void linearLayerBackward()
+{
+    
 }
 
 
@@ -148,7 +172,6 @@ int main()
     cudaMemcpy(d_input, x_train, input_size * batch_size * sizeof(float), cudaMemcpyHostToDevice);
     cudaMemcpy(d_weights, weights, input_size * hidden_size + hidden_size * hidden_size + hidden_size * output_size * sizeof(float), cudaMemcpyHostToDevice);
     cudaMemcpy(d_biases, biases, hidden_size + hidden_size + output_size * sizeof(float), cudaMemcpyHostToDevice);
-
 
     //free host memory
     delete[] x_train;
