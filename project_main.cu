@@ -222,18 +222,21 @@ int main()
     {
         for(int i = 0; i < 60000 / batch_size; i++)
         {
-        linearLayerForward<<<batch_size, hidden_size>>>(d_layer1.inputs, d_layer1.outputs, d_layer1.weights, d_layer1.biases, 
-                                                        input_size, hidden_size, batch_size);
-        cudaMemcpy(d_layer2.inputs,d_layer1.outputs, hidden_size * batch_size * sizeof(float), cudaMemcpyDeviceToDevice);
-        relu<<<batch_size, hidden_size>>>(d_layer2.inputs, d_layer2.inputs);
+            //Forward pass: input -> hidden
+            linearLayerForward<<<batch_size, hidden_size>>>(d_layer1.inputs, d_layer1.outputs, d_layer1.weights, d_layer1.biases, 
+                                                            input_size, hidden_size, batch_size);
+            cudaMemcpy(d_layer2.inputs,d_layer1.outputs, hidden_size * batch_size * sizeof(float), cudaMemcpyDeviceToDevice);
+            relu<<<batch_size, hidden_size>>>(d_layer2.inputs, d_layer2.inputs);
 
-        linearLayerForward<<<batch_size, hidden_size>>>(d_layer2.inputs, d_layer2.outputs, d_layer2.weights, d_layer2.biases,
-                                                        hidden_size, hidden_size, batch_size);
-        cudaMemcpy(d_layer3.inputs, d_layer2.outputs, hidden_size * batch_size * sizeof(float), cudaMemcpyDeviceToDevice);
-        relu<<<batch_size, hidden_size>>>(d_layer3.inputs, d_layer3.inputs);
+            //Forward pass: hidden -> hidden
+            linearLayerForward<<<batch_size, hidden_size>>>(d_layer2.inputs, d_layer2.outputs, d_layer2.weights, d_layer2.biases,
+                                                            hidden_size, hidden_size, batch_size);
+            cudaMemcpy(d_layer3.inputs, d_layer2.outputs, hidden_size * batch_size * sizeof(float), cudaMemcpyDeviceToDevice);
+            relu<<<batch_size, hidden_size>>>(d_layer3.inputs, d_layer3.inputs);
 
-        linearLayerForward<<<batch_size, output_size>>>(d_layer3.inputs, d_layer3.outputs, d_layer3.weights, d_layer3.biases,
-                                                        hidden_size, output_size, batch_size);
+            //Forward pass: hidden -> output
+            linearLayerForward<<<batch_size, output_size>>>(d_layer3.inputs, d_layer3.outputs, d_layer3.weights, d_layer3.biases,
+                                                            hidden_size, output_size, batch_size);
         }
     }
 
