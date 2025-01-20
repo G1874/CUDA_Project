@@ -1,7 +1,13 @@
 #include <iostream>
 #include <fstream>
 #include <random>
+#include <cmath>
 
+typedef enum {
+    RELU,
+    SIGMOID,
+    NO_ACTIVATION_FCN
+} activationFunction_type;
 
 float* load_data(const char* filename, int size)
 {
@@ -30,6 +36,54 @@ void normalize_data(float* data, int size)
     for(int i = 0; i < size; i++)
     {
         data[i] = data[i] / 255.0;
+    }
+}
+
+
+__device__ relu(float x)
+{
+    return x > 0.0f ? x : 0.0f;
+}
+
+__device__ reluDerivative(float x)
+{
+    return x > 0.0f ? 1.0f : 0.0f;
+}
+
+__device__ sigmoid(float x)
+{
+    return 1.0f / (1.0f + expf(-x));
+}
+
+__device__ sigmoidDerivative(float x)
+{
+    return sigmoid(x) * (1.0f - sigmoid(x));
+}
+
+__global__ void linearLayerForward(float* input, float* output, float* weights, float* biases,
+                                   int inputSize, int outputSize, int batchSize, activationFcn_type activation)
+{
+    int batch_idx = blockIdx.x * blockDim.x;
+    int output_idx = batch_idx + threadIdx.x;
+    int sample_idx = batch_idx * inputSize;
+
+    float sum = 0.0f;
+    for(int i=0; i<inputSize, i++)
+    {
+        sum += input[sample_idx + i] * weights[output_idx*inputSize + i];
+    }
+
+    switch(activation)
+    {
+        case RELU:
+            output[output_idx] = relu(sum);
+            break;
+        case SIGMOID:
+            output[output_idx] = sigmoid(sum);
+            break;
+        case NO_ACTIVATION_FCN:
+            output[output_idx] = sum;
+            break;
     }
 }
 
