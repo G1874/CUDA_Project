@@ -10,8 +10,8 @@ typedef struct {
     float* inputs;
     float* outputs;
     float* activation;
-    // float* output_grad; ?
-    // float* input_grad ?
+    float* output_grad;
+    float* input_grad;
     // float* weights_grad;
     // float* bias_grad;
 } layer_type;
@@ -200,7 +200,8 @@ int main()
     initialize_biases(layer3.biases, output_size);
 
     //allocate device memory
-    // float* d_labels;
+    float* d_labels;
+    cudaMalloc((void**)&d_labels, output_size * batch_size * sizeof(float));
 
     layer_type d_layer1, d_layer2, d_layer3;
 
@@ -208,24 +209,24 @@ int main()
     cudaMalloc((void**)&d_layer1.biases, hidden_size * sizeof(float));
     cudaMalloc((void**)&d_layer1.inputs, input_size * batch_size * sizeof(float));
     cudaMalloc((void**)&d_layer1.outputs, hidden_size * batch_size * sizeof(float));
-    cudaMalloc((void**)&d_layer1.activation, hidden_size * batch_size * sizeof(float))
+    cudaMalloc((void**)&d_layer1.activation, hidden_size * batch_size * sizeof(float));
 
     cudaMalloc((void**)&d_layer2.weights, hidden_size * hidden_size * sizeof(float));
     cudaMalloc((void**)&d_layer2.biases, hidden_size * sizeof(float));
     cudaMalloc((void**)&d_layer2.inputs, hidden_size * batch_size * sizeof(float));
     cudaMalloc((void**)&d_layer2.outputs, hidden_size * batch_size * sizeof(float));
-    cudaMalloc((void**)&d_layer2.activation, hidden_size * batch_size * sizeof(float))
+    cudaMalloc((void**)&d_layer2.activation, hidden_size * batch_size * sizeof(float));
 
     cudaMalloc((void**)&d_layer3.weights, hidden_size * output_size * sizeof(float));
     cudaMalloc((void**)&d_layer3.biases, output_size * sizeof(float));
     cudaMalloc((void**)&d_layer3.inputs, hidden_size * batch_size * sizeof(float));
     cudaMalloc((void**)&d_layer3.outputs, output_size * batch_size * sizeof(float));
-    cudaMalloc((void**)&d_layer3.activation, output_size * batch_size * sizeof(float))
+    cudaMalloc((void**)&d_layer3.activation, output_size * batch_size * sizeof(float));
 
 
     //copy data to device
     cudaMemcpy(d_layer1.inputs, x_train, input_size * batch_size * sizeof(float), cudaMemcpyHostToDevice);
-    // TODO:
+    cudaMemcpy(d_labels, y_train, output_size * batch_size * sizeof(float), cudaMemcpyHostToDevice);
 
     cudaMemcpy(d_layer1.weights, layer1.weights, input_size * hidden_size * sizeof(float), cudaMemcpyHostToDevice);
     cudaMemcpy(d_layer1.biases, layer1.biases, hidden_size * sizeof(float), cudaMemcpyHostToDevice);
