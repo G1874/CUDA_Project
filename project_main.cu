@@ -9,6 +9,11 @@ typedef struct {
     float* biases;
     float* inputs;
     float* outputs;
+    float* activation;
+    // float* output_grad; ?
+    // float* input_grad ?
+    // float* weights_grad;
+    // float* bias_grad;
 } layer_type;
 
 
@@ -105,17 +110,16 @@ __global__ void crossEntropyLoss(float* predictions, float* labels, float* loss)
 }
 
 
-__device__ void crossEntropyLossDerivative(float* predictions, float* labels, float* output)
+__global__ void crossEntropyLossDerivative(float* predictions, float* labels, float* error_grad)
 {
     int batch_idx = blockIdx.x * blockDim.x;
     int idx = batch_idx * threadIdx.x;
 
-    output[idx] = predictions[idx] - labels[idx];
+    error_grad[idx] = predictions[idx] - labels[idx];
 }
 
 
-__global__ void linearLayerForward(float* input, float* output, float* weights, float* biases,
-                                   int inputSize, int outputSize, int batchSize)
+__global__ void linearLayerForward(layer_type layer, int inputSize, int outputSize, int batchSize)
 {
     int batch_idx = blockIdx.x * blockDim.x;
     int neuron_idx = threadIdx.x;
@@ -125,15 +129,14 @@ __global__ void linearLayerForward(float* input, float* output, float* weights, 
     float sum = 0.0f;
     for(int i=0; i<inputSize; i++)
     {
-        sum += input[sample_idx + i] * weights[neuron_idx*inputSize + i];
+        sum += layer.inputs[sample_idx + i] * layer.weights[neuron_idx*inputSize + i];
     }
     
-    output[output_idx] = sum + biases[neuron_idx];
+    layer.output[output_idx] = sum + layer.biases[neuron_idx];
 }
 
 
-__global__ void linearLayerBackward(float* error_grad, float* inputs, float* input_grad,
-                                    float* weights_grad, float* biases_grad, int batchSize)
+__global__ void linearLayerBackward(layer_type layer, float* inputs, int inputSize, int outputSize, int batchSize)
 {
     int batch_idx = blockIdx.x * blockDim.x;
     int output_idx = batch_idx * threadIdx.x;
@@ -141,7 +144,7 @@ __global__ void linearLayerBackward(float* error_grad, float* inputs, float* inp
 
     for(int i=0; i<inputSize; i++)
     {
-        weights_grad[output_idx*inputSize + i] = error_grad[output_idx] + inputs[sample_idx + i];
+        weights_grad[output_idx*inputSize + i] = layer.input_grad[output_idx] + inputs[sample_idx + i];
     } 
 }
 
@@ -160,6 +163,9 @@ int main()
     float* x_test;
     float* y_test;
 
+    // float* inputs = new float[input_size * batch_size];
+    // float* predictions = new float[output_size * batch_size];
+
     x_train = load_data("dataset/x_train.txt", 60000 * input_size);
     y_train = load_data("dataset/y_train.txt", 60000);
     x_test = load_data("dataset/x_test.txt", 10000 * input_size);
@@ -168,13 +174,12 @@ int main()
     normalize_data(x_train, 60000 * input_size);
     normalize_data(x_test, 10000 * input_size);
 
-    //intialize layers
+    //intialize host layers
     layer_type layer1, layer2, layer3;
 
     //layer 1
     layer1.weights = new float[input_size * hidden_size];
     layer1.biases = new float[hidden_size];
-    layer1.inputs = new float[input_size * batch_size];
 
     //layer 2
     layer2.weights = new float[hidden_size * hidden_size];
@@ -183,7 +188,6 @@ int main()
     //layer 3
     layer3.weights = new float[hidden_size * output_size];
     layer3.biases = new float[output_size];
-    layer3.outputs = new float[output_size * batch_size];
 
 
     //initialize weights and biases
@@ -196,26 +200,33 @@ int main()
     initialize_biases(layer3.biases, output_size);
 
     //allocate device memory
+    // float* d_labels;
+
     layer_type d_layer1, d_layer2, d_layer3;
 
-    cudaMalloc(&d_layer1.weights, input_size * hidden_size * sizeof(float));
-    cudaMalloc(&d_layer1.biases, hidden_size * sizeof(float));
-    cudaMalloc(&d_layer1.inputs, input_size * batch_size * sizeof(float));
-    cudaMalloc(&d_layer1.outputs, hidden_size * batch_size * sizeof(float));
+    cudaMalloc((void**)&d_layer1.weights, input_size * hidden_size * sizeof(float));
+    cudaMalloc((void**)&d_layer1.biases, hidden_size * sizeof(float));
+    cudaMalloc((void**)&d_layer1.inputs, input_size * batch_size * sizeof(float));
+    cudaMalloc((void**)&d_layer1.outputs, hidden_size * batch_size * sizeof(float));
+    cudaMalloc((void**)&d_layer1.activation, hidden_size * batch_size * sizeof(float))
 
-    cudaMalloc(&d_layer2.weights, hidden_size * hidden_size * sizeof(float));
-    cudaMalloc(&d_layer2.biases, hidden_size * sizeof(float));
-    cudaMalloc(&d_layer2.inputs, hidden_size * batch_size * sizeof(float));
-    cudaMalloc(&d_layer2.outputs, hidden_size * batch_size * sizeof(float));
+    cudaMalloc((void**)&d_layer2.weights, hidden_size * hidden_size * sizeof(float));
+    cudaMalloc((void**)&d_layer2.biases, hidden_size * sizeof(float));
+    cudaMalloc((void**)&d_layer2.inputs, hidden_size * batch_size * sizeof(float));
+    cudaMalloc((void**)&d_layer2.outputs, hidden_size * batch_size * sizeof(float));
+    cudaMalloc((void**)&d_layer2.activation, hidden_size * batch_size * sizeof(float))
 
-    cudaMalloc(&d_layer3.weights, hidden_size * output_size * sizeof(float));
-    cudaMalloc(&d_layer3.biases, output_size * sizeof(float));
-    cudaMalloc(&d_layer3.inputs, hidden_size * batch_size * sizeof(float));
-    cudaMalloc(&d_layer3.outputs, output_size * batch_size * sizeof(float));
+    cudaMalloc((void**)&d_layer3.weights, hidden_size * output_size * sizeof(float));
+    cudaMalloc((void**)&d_layer3.biases, output_size * sizeof(float));
+    cudaMalloc((void**)&d_layer3.inputs, hidden_size * batch_size * sizeof(float));
+    cudaMalloc((void**)&d_layer3.outputs, output_size * batch_size * sizeof(float));
+    cudaMalloc((void**)&d_layer3.activation, output_size * batch_size * sizeof(float))
 
 
     //copy data to device
     cudaMemcpy(d_layer1.inputs, x_train, input_size * batch_size * sizeof(float), cudaMemcpyHostToDevice);
+    // TODO:
+
     cudaMemcpy(d_layer1.weights, layer1.weights, input_size * hidden_size * sizeof(float), cudaMemcpyHostToDevice);
     cudaMemcpy(d_layer1.biases, layer1.biases, hidden_size * sizeof(float), cudaMemcpyHostToDevice);
     cudaMemcpy(d_layer2.weights, layer2.weights, hidden_size * hidden_size * sizeof(float), cudaMemcpyHostToDevice);
@@ -225,26 +236,41 @@ int main()
 
 
 
-    //forward pass
+    
     for(int epoch = 0; epoch < 1; epoch++)
     {
         for(int i = 0; i < 60000 / batch_size; i++)
         {
-            //Forward pass: input -> hidden
-            linearLayerForward<<<batch_size, hidden_size>>>(d_layer1.inputs, d_layer1.outputs, d_layer1.weights, d_layer1.biases, 
-                                                            input_size, hidden_size, batch_size);
-            cudaMemcpy(d_layer2.inputs,d_layer1.outputs, hidden_size * batch_size * sizeof(float), cudaMemcpyDeviceToDevice);
-            relu<<<batch_size, hidden_size>>>(d_layer2.inputs, d_layer2.inputs);
+            // Forward pass: input -> hidden
+            linearLayerForward<<<batch_size, hidden_size>>>(d_layer1, input_size, hidden_size, batch_size);
+            relu<<<batch_size, hidden_size>>>(d_layer1.outputs, d_layer1.activation);
+            cudaMemcpy(d_layer2.inputs, d_layer1.activation, hidden_size * batch_size * sizeof(float), cudaMemcpyDeviceToDevice);
 
-            //Forward pass: hidden -> hidden
-            linearLayerForward<<<batch_size, hidden_size>>>(d_layer2.inputs, d_layer2.outputs, d_layer2.weights, d_layer2.biases,
-                                                            hidden_size, hidden_size, batch_size);
-            cudaMemcpy(d_layer3.inputs, d_layer2.outputs, hidden_size * batch_size * sizeof(float), cudaMemcpyDeviceToDevice);
-            relu<<<batch_size, hidden_size>>>(d_layer3.inputs, d_layer3.inputs);
+            // Forward pass: hidden -> hidden
+            linearLayerForward<<<batch_size, hidden_size>>>(d_layer2, hidden_size, hidden_size, batch_size);
+            relu<<<batch_size, hidden_size>>>(d_layer2.outputs, d_layer2.activation);
+            cudaMemcpy(d_layer3.inputs, d_layer2.activation, hidden_size * batch_size * sizeof(float), cudaMemcpyDeviceToDevice);
 
-            //Forward pass: hidden -> output
-            linearLayerForward<<<batch_size, output_size>>>(d_layer3.inputs, d_layer3.outputs, d_layer3.weights, d_layer3.biases,
-                                                            hidden_size, output_size, batch_size);
+            // Forward pass: hidden -> output
+            linearLayerForward<<<batch_size, output_size>>>(d_layer3, hidden_size, output_size, batch_size);
+            softmax<<<batch_size, output_size>>>(d_layer3.outputs, d_layer3.activation);
+
+            // Loss TODO:
+            // crossEntropyLoss<<<batch_size, output_size>>>(d_layer3.activation, d_labels, d_loss);
+            // cudaMemcpy(h_loss, d_loss, sizeof(float), cudaMemcpyDeviceToHost);
+            // printf("Batch: %d, Loss: %f", i, h_loss);
+
+            // Backward pass: output -> hidden
+            crossEntropyLossDerivative<<<batch_size, output_size>>>(d_layer3.activation, d_labels, d_layer3.input_grad); // Combined with softmax derivative
+            linearLayerBackward<<<batch_size, output_size>>>(d_layer3, d_layer2.activation, hidden_size, output_size, batch_size);
+
+            // Backward pass: hidden -> hidden
+            reluDerivative<<<batch_size, hidden_size>>>(d_layer3.output_grad, d_layer2.input_grad);
+            linearLayerBackward<<<batch_size, hidden_size>>>(d_layer2, d_layer1.activation, hidden_size, output_size, batch_size);
+
+            // Backward pass: hidden -> input
+            reluDerivative<<<batch_size, hidden_size>>>(d_layer2.output_grad, d_layer1.input_grad);
+            linearLayerBackward<<<batch_size, hidden_size>>>(d_layer1, d_layer1.activation, hidden_size, output_size, batch_size);
         }
     }
 
