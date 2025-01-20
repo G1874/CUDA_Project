@@ -3,11 +3,13 @@
 #include <random>
 #include <cmath>
 
+
 typedef enum {
     RELU,
     SIGMOID,
     NO_ACTIVATION_FCN
-} activationFunction_type;
+} activationFcn_type;
+
 
 float* load_data(const char* filename, int size)
 {
@@ -40,25 +42,29 @@ void normalize_data(float* data, int size)
 }
 
 
-__device__ relu(float x)
+__device__ float relu(float x)
 {
     return x > 0.0f ? x : 0.0f;
 }
 
-__device__ reluDerivative(float x)
+
+__device__ float reluDerivative(float x)
 {
     return x > 0.0f ? 1.0f : 0.0f;
 }
 
-__device__ sigmoid(float x)
+
+__device__ float sigmoid(float x)
 {
     return 1.0f / (1.0f + expf(-x));
 }
 
-__device__ sigmoidDerivative(float x)
+
+__device__ float sigmoidDerivative(float x)
 {
     return sigmoid(x) * (1.0f - sigmoid(x));
 }
+
 
 __global__ void linearLayerForward(float* input, float* output, float* weights, float* biases,
                                    int inputSize, int outputSize, int batchSize, activationFcn_type activation)
@@ -68,10 +74,11 @@ __global__ void linearLayerForward(float* input, float* output, float* weights, 
     int sample_idx = batch_idx * inputSize;
 
     float sum = 0.0f;
-    for(int i=0; i<inputSize, i++)
+    for(int i=0; i<inputSize; i++)
     {
         sum += input[sample_idx + i] * weights[output_idx*inputSize + i];
     }
+    sum += biases[output_idx];
 
     switch(activation)
     {
