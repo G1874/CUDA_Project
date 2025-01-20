@@ -1,5 +1,11 @@
 #include <iostream>
+#include <cmath>
 
+typedef enum {
+    RELU,
+    SIGMOID,
+    SOFTMAX
+} activationFunction_type;
 
 float* load_data(const char* filename, int size)
 {
@@ -29,6 +35,36 @@ void normalize_data(float* data, int size)
     {
         data[i] = data[i] / 255.0;
     }
+}
+
+
+__device__ relu(float x)
+{
+    return x > 0.0f ? x : 0.0f;
+}
+
+__device__ reluDerivative(float x)
+{
+    return x > 0.0f ? 1.0f : 0.0f;
+}
+
+__device__ sigmoid(float x)
+{
+    return 1.0f / (1.0f + expf(-x));
+}
+
+__device__ sigmoidDerivative(float x)
+{
+    return sigmoid(x) * (1.0f - sigmoid(x));
+}
+
+__global__ void linearLayerForward(float* input, float* output, float* weights, float* biases,
+                                   int inputSize, int outputSize, int batchSize, activationFcn_type activation)
+{
+    int idx = threadIdx.x;
+
+    float sum = 0.0f;
+    for(int i=0; i<inputSize, )
 }
 
 
