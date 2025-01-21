@@ -161,10 +161,13 @@ __global__ void linearLayerBackward(layer_type layer, int inputSize, int layerSi
     atomicAdd(&layer.bias_grad[neuron_idx], bias_grad);
 
     float weight_grad;
+    float output_grad;
     for(int i=0; i<inputSize; i++)
     {
         weight_grad = layer.input_grad[output_idx] * layer.inputs[sample_idx + i];
         atomicAdd(&layer.weights_grad[neuron_idx*inputSize + i], weight_grad);
+        output_grad = layer.weights[neuron_idx*inputSize + i] * layer.input_grad[output_idx];
+        atomicAdd(&layer.output_grad[sample_idx + i], output_grad);
     }
 }
 
@@ -177,7 +180,7 @@ __global__ void updateLayer(layer_type layer, float lr, int inputSize, int layer
 
     for(int i=0; i<inputSize; i++)
     {
-        layer.weights_grad[neuron_idx*inputSize + i] -= lr * (layer.weights_grad[neuron_idx*inputSize + i] / batchSize);
+        layer.weights_grad[neuron_idx*inputSize + i] -= lr * (layer.weights_grad[neuron_idx*inputSize + i] / (float)batchSize);
     }
 }
 
@@ -186,17 +189,17 @@ int main()
 {
     const int input_size = 28 * 28;
     const int output_size = 10;
-    const int hidden_size = 128;
-    const int batch_size = 1;
+    const int hidden_size = 256;
+    const int batch_size = 60;
     const int num_epochs = 10;
-    const float learning_rate = 0.001f;
+    const float learning_rate = 0.00005f;
 
     float* x_train;
     float* y_train;
     float* x_test;
     float* y_test;
 
-    int train_set_size = 10000;
+    int train_set_size = 60000;
     int test_set_size = 10000;
 
     x_train = load_data("dataset/x_train.txt", train_set_size * input_size);
@@ -259,8 +262,8 @@ int main()
     cudaMalloc((void**)&d_layer1.activation, hidden_size * batch_size * sizeof(float));
     cudaMalloc((void**)&d_layer1.weights_grad, input_size * hidden_size * sizeof(float));
     cudaMalloc((void**)&d_layer1.bias_grad, hidden_size * sizeof(float));
-    cudaMalloc((void**)&d_layer1.input_grad,  input_size * batch_size * sizeof(float));
-    cudaMalloc((void**)&d_layer1.output_grad, hidden_size * batch_size * sizeof(float));
+    cudaMalloc((void**)&d_layer1.input_grad, hidden_size * batch_size * sizeof(float));
+    cudaMalloc((void**)&d_layer1.output_grad, input_size * batch_size * sizeof(float));
 
     cudaMalloc((void**)&d_layer2.weights, hidden_size * hidden_size * sizeof(float));
     cudaMalloc((void**)&d_layer2.biases, hidden_size * sizeof(float));
@@ -279,8 +282,8 @@ int main()
     cudaMalloc((void**)&d_layer3.activation, output_size * batch_size * sizeof(float));
     cudaMalloc((void**)&d_layer3.weights_grad, hidden_size * output_size * sizeof(float));
     cudaMalloc((void**)&d_layer3.bias_grad, output_size * sizeof(float));
-    cudaMalloc((void**)&d_layer3.input_grad, hidden_size * batch_size * sizeof(float));
-    cudaMalloc((void**)&d_layer3.output_grad, output_size * batch_size * sizeof(float));
+    cudaMalloc((void**)&d_layer3.input_grad, output_size * batch_size * sizeof(float));
+    cudaMalloc((void**)&d_layer3.output_grad, hidden_size * batch_size * sizeof(float));
 
     //copy data to device
     cudaMemcpy(d_layer1.weights, layer1.weights, input_size * hidden_size * sizeof(float), cudaMemcpyHostToDevice);
@@ -296,13 +299,12 @@ int main()
     float* temp = new float[hidden_size];
     for(int epoch = 1; epoch <= 1; epoch++)
     {
-        printf("Epoch: %d", epoch);
-        
-        loss = 0.0f;
-        cudaMemset(d_loss, 0, batch_size * sizeof(float));
-        
-        for(int i = 0; i < 1; i+=batch_size)
+        printf("Epoch: %d\n", epoch);
+        for(int i = 0; i < train_set_size; i+=batch_size)
         {
+            loss = 0.0f;
+            cudaMemset(d_loss, 0, batch_size * sizeof(float));
+
             cudaMemcpy(d_layer1.inputs, &x_train[i*input_size], input_size * batch_size * sizeof(float), cudaMemcpyHostToDevice);
             cudaMemcpy(d_labels, &train_labels[i*output_size], output_size * batch_size * sizeof(float), cudaMemcpyHostToDevice);
 
@@ -329,7 +331,7 @@ int main()
                 // printf("Partial loss: %f", losses[j]);   
                 loss += losses[j] / (float)batch_size;
             }
-            printf("Batch: %d, Loss: %f", i, loss);
+            printf("Batch: %d, Loss: %f\n", i, loss);
 
 
             // Backward pass: output -> hidden
@@ -339,13 +341,13 @@ int main()
 
             // Backward pass: hidden -> hidden
             reluDerivative<<<batch_size, hidden_size>>>(d_layer3.output_grad, d_layer2.input_grad);
-            // linearLayerBackward<<<batch_size, hidden_size>>>(d_layer2, hidden_size, hidden_size, batch_size);
-            // updateLayer<<<1, hidden_size>>>(d_layer2, learning_rate, hidden_size, hidden_size, batch_size);
+            linearLayerBackward<<<batch_size, hidden_size>>>(d_layer2, hidden_size, hidden_size, batch_size);
+            updateLayer<<<1, hidden_size>>>(d_layer2, learning_rate, hidden_size, hidden_size, batch_size);
 
             // // Backward pass: hidden -> input
-            // reluDerivative<<<batch_size, hidden_size>>>(d_layer2.output_grad, d_layer1.input_grad);
-            // linearLayerBackward<<<batch_size, hidden_size>>>(d_layer1, input_size, hidden_size, batch_size);
-            // updateLayer<<<1, hidden_size>>>(d_layer1, learning_rate, input_size, hidden_size, batch_size);
+            reluDerivative<<<batch_size, hidden_size>>>(d_layer2.output_grad, d_layer1.input_grad);
+            linearLayerBackward<<<batch_size, hidden_size>>>(d_layer1, input_size, hidden_size, batch_size);
+            updateLayer<<<1, hidden_size>>>(d_layer1, learning_rate, input_size, hidden_size, batch_size);
         }
     }
 
