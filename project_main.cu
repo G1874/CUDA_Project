@@ -180,7 +180,7 @@ __global__ void updateLayer(layer_type layer, float lr, int inputSize, int layer
 
     for(int i=0; i<inputSize; i++)
     {
-        layer.weights_grad[neuron_idx*inputSize + i] -= lr * (layer.weights_grad[neuron_idx*inputSize + i] / (float)batchSize);
+        layer.weights[neuron_idx*inputSize + i] -= lr * (layer.weights_grad[neuron_idx*inputSize + i] / (float)batchSize);
     }
 }
 
@@ -192,7 +192,7 @@ int main()
     const int hidden_size = 256;
     const int batch_size = 60;
     const int num_epochs = 10;
-    const float learning_rate = 0.00005f;
+    const float learning_rate = 0.001f;
 
     float* x_train;
     float* y_train;
