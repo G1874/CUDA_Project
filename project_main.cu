@@ -63,7 +63,7 @@ void one_hot_encode(float* y, float* label_vector, int size)
 void initialize_weights(float* weights, int size)
 {
     std::mt19937 g(time(0));
-    std::uniform_real_distribution<float> dist(-1.0f, 1.0f);
+    std::uniform_real_distribution<float> dist(-0.1f, 0.1f);
 
     for(int i = 0; i < size; i++)
     {
@@ -104,7 +104,7 @@ __global__ void softmax(float* input, float* output)
     int batch_idx = blockIdx.x;
     int idx = batch_idx * blockDim.x + threadIdx.x;
 
-    extern __shared__ float sum;
+    __shared__ float sum;
 
     atomicAdd(&sum, expf(input[idx]));
     __syncthreads();
@@ -301,7 +301,7 @@ int main()
         loss = 0.0f;
         cudaMemset(d_loss, 0, batch_size * sizeof(float));
         
-        for(int i = 0; i < train_set_size / batch_size; i+=batch_size)
+        for(int i = 0; i < 1; i+=batch_size)
         {
             cudaMemcpy(d_layer1.inputs, &x_train[i*input_size], input_size * batch_size * sizeof(float), cudaMemcpyHostToDevice);
             cudaMemcpy(d_labels, &train_labels[i*output_size], output_size * batch_size * sizeof(float), cudaMemcpyHostToDevice);
@@ -319,34 +319,26 @@ int main()
             // Forward pass: hidden -> output
             linearLayerForward<<<batch_size, output_size>>>(d_layer3, hidden_size, output_size, batch_size);
             softmax<<<batch_size, output_size>>>(d_layer3.outputs, d_layer3.activation);
-            // cudaMemcpy(temp, d_layer3.activation, output_size * batch_size * sizeof(float), cudaMemcpyDeviceToHost);
 
-            // for(int j=0; j<output_size; j++)
-            // {
-                // if(temp[j] != 0.0)
-                // {
-                    // printf("d_layer1.inputs: %f", temp[j]);
-                // }
-            // }
 
             // Loss
-            // crossEntropyLoss<<<batch_size, output_size>>>(d_layer3.activation, d_labels, d_loss);
-            // cudaMemcpy(losses, d_loss, batch_size * sizeof(float), cudaMemcpyDeviceToHost);
-            // for(int j=0; j<batch_size; j++)
-            // {
-            //     printf("Partial loss: %f", losses[j]);   
-            //     loss += losses[j] / (float)batch_size;
-            // }
-            // printf("Batch: %d, Loss: %f", i, loss);
+            crossEntropyLoss<<<batch_size, output_size>>>(d_layer3.activation, d_labels, d_loss);
+            cudaMemcpy(losses, d_loss, batch_size * sizeof(float), cudaMemcpyDeviceToHost);
+            for(int j=0; j<batch_size; j++)
+            {
+                // printf("Partial loss: %f", losses[j]);   
+                loss += losses[j] / (float)batch_size;
+            }
+            printf("Batch: %d, Loss: %f", i, loss);
 
 
-            // // Backward pass: output -> hidden
-            // crossEntropyLossDerivative<<<batch_size, output_size>>>(d_layer3.activation, d_labels, d_layer3.input_grad);
-            // linearLayerBackward<<<batch_size, output_size>>>(d_layer3, hidden_size, output_size, batch_size);
-            // updateLayer<<<1, output_size>>>(d_layer3, learning_rate, hidden_size, output_size, batch_size);
+            // Backward pass: output -> hidden
+            crossEntropyLossDerivative<<<batch_size, output_size>>>(d_layer3.activation, d_labels, d_layer3.input_grad);
+            linearLayerBackward<<<batch_size, output_size>>>(d_layer3, hidden_size, output_size, batch_size);
+            updateLayer<<<1, output_size>>>(d_layer3, learning_rate, hidden_size, output_size, batch_size);
 
-            // // Backward pass: hidden -> hidden
-            // reluDerivative<<<batch_size, hidden_size>>>(d_layer3.output_grad, d_layer2.input_grad);
+            // Backward pass: hidden -> hidden
+            reluDerivative<<<batch_size, hidden_size>>>(d_layer3.output_grad, d_layer2.input_grad);
             // linearLayerBackward<<<batch_size, hidden_size>>>(d_layer2, hidden_size, hidden_size, batch_size);
             // updateLayer<<<1, hidden_size>>>(d_layer2, learning_rate, hidden_size, hidden_size, batch_size);
 
